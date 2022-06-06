@@ -1,0 +1,159 @@
+import re
+import numpy as np
+
+class LinearProgramming:
+    def __init__(self, A, B, C, N, M):
+        self.A = A
+        self.B = B
+        self.C = C
+        self.restrictions = N
+        self.variables = M
+        self.Certificate = np.empty((self.B.shape), dtype=float)
+        self.Status = 0
+        self.solution = np.zeros((self.B.shape[0], 1), dtype=float)
+        self.Tableau = np.zeros((A.shape[1] + 1, A.shape[0] + (2* A.shape[1]) + 1), dtype=float)
+        self.Tableau_aux = np.zeros((A.shape[1] + 1, A.shape[0] + (2* A.shape[1]) + 1), dtype=float)
+        self.optimal_value = self.Tableau[0, -1]
+        self.bases_aux = 0
+
+    def get_certificate(self):
+        return self.Certificate
+    
+    def get_status(self):
+        return self.Status
+    
+    def get_optimal_value(self):
+        return self.optimal_value
+    
+    def get_solution(self):
+        return self.solution
+    
+    def set_tableau(self, tableau):
+        self.Tableau = tableau
+    
+    def print_tableau(self):
+        print(self.Tableau)
+
+    def B_negative_lines(self):
+        negative_index = []
+        for index in range(0, self.B.shape[0]):
+            if self.B[index] < 0:
+                negative_index.append(index)
+        return negative_index
+
+    def make_Tableau(self, A, B, C):
+        negative_index = self.B_negative_lines()
+        n_variables = B.shape[0]
+        identity = np.identity(n_variables)
+        certificate_on_tableau = np.zeros((n_variables, 1), dtype=float)
+        optimal_value = np.zeros((1,1), dtype=float)
+        C_negative = C * -1
+        first_row = np.concatenate((certificate_on_tableau.T, C_negative.T, certificate_on_tableau.T, optimal_value), axis= 1)
+        second_to_last_rows = np.concatenate((identity, A, identity, B), axis=1)
+        Tableau = np.concatenate((first_row, second_to_last_rows), axis=0)
+        for index in negative_index:
+            Tableau[index] *= -1
+        return Tableau
+
+    def make_Tableau_aux(self, A, B, C):
+        negative_index = self.B_negative_lines()
+        A_aux = A.copy()
+        B_aux = B.copy()
+        n_variables = B_aux.shape[0]
+        operations_matrix = np.identity(n_variables)
+        for index in negative_index:
+            A_aux[index] *= -1
+            B_aux[index] *= -1
+            operations_matrix[index] *= -1 
+        c_aux = np.zeros((C.shape[0], 1), dtype=float)
+        ones_aux = np.ones((B_aux.shape[0], 1), dtype=float)
+        identity = np.identity(n_variables)
+        certificate_on_tableau = np.zeros((n_variables, 1), dtype=float)
+        optimal_value = np.zeros((1,1), dtype=float)
+        first_row = np.concatenate((certificate_on_tableau.T, c_aux.T, certificate_on_tableau.T, ones_aux.T, optimal_value), axis= 1)
+        second_to_last_rows = np.concatenate((operations_matrix, A_aux, operations_matrix, identity, B_aux), axis=1)
+        Tableau_aux = np.concatenate((first_row, second_to_last_rows), axis=0)
+        for index in range(1, B_aux.shape[0]+1):
+            Tableau_aux[0] -= Tableau_aux[index]
+        return Tableau_aux        
+     
+    def get_original_base(self, Tableau_aux):
+        base_values_original = self.find_base(Tableau_aux)
+        original_columns = range(self.B.shape[0],self.B.shape[0] + self.C.shape[0])
+        for row, column in base_values_original.items():
+            if column in original_columns:
+                self.Tableau = self.pivot(self.Tableau, column, row)
+        return self.Tableau
+        
+    def find_base(self, Tableau_aux):
+        base_values = {}
+        for column in range(self.B.shape[0], 2*self.B.shape[0]):
+            if Tableau_aux[:,column].sum() == 1:
+                for row in range(1, Tableau_aux.shape[0]):
+                    if Tableau_aux[row, column] == 1:
+                        base_values[row] = column
+                        break
+        return base_values
+
+    def make_solution(self, Tableau):
+        solution = []
+        used = []
+        tableau_transpose = np.transpose(Tableau)
+        for column in tableau_transpose[self.variables:-1]:
+            ones = np.sum(column == 1)
+            zeros = np.sum(np.isclose(column, 0))
+            if(zeros == column.shape[0] - 1 and ones == 1):
+                one_pos = np.argwhere(column == 1)[0,0]
+                if(not(one_pos in used)):
+                    solution.append(Tableau[one_pos,-1])
+                    used.append(one_pos)
+                else:
+                    solution.append(0)
+            else:
+                solution.append(0)      
+        return solution
+          
+    def pivot(self, Tableau, column, row):
+        Tableau[row] /= Tableau[row, column]
+        for row_iter in range(Tableau.shape[0]):
+            if row_iter != row:
+                Tableau[row_iter] -= (Tableau[row_iter,column] * Tableau[row])
+        return Tableau
+    
+    def Simplex_model(self, A, B, C, TableauAux):
+        while(not np.all((TableauAux[0, A.shape[1]:-1] > 0) + np.isclose(TableauAux[0, A.shape[1]:-1], 0))):
+            column_index = -1
+            row_index = -1
+            min_ratio = np.inf
+            for index, value in enumerate(TableauAux[0, A.shape[1]:-1]):
+                if(value < 0 and (not np.isclose(value,0))):
+                    column_index = index + A.shape[1]
+                    break
+    
+            for index in range(1, TableauAux.shape[0]):
+                if(TableauAux[index, column_index] > 0 and (not np.isclose(TableauAux[index, column_index], 0)) and (TableauAux[index, -1]/TableauAux[index, column_index] < min_ratio)):
+                    min_ratio = TableauAux[index, -1]/TableauAux[index, column_index]
+                    row_index = index
+            TableauAux = self.pivot(TableauAux, column_index, row_index)
+        return TableauAux  
+    
+    def Simplex_aux(self, A, B, C):
+        self.Tableau_aux = self.make_Tableau_aux(A, B, C)
+        self.Tableau_aux = self.Simplex_model(A, B, C, self.Tableau_aux)
+        if not np.isclose(self.Tableau_aux[0,-1], 0):
+            self.Status = 'inviavel'
+            self.Certificate = self.Tableau_aux[0, 0:B.shape[0]]
+            return True
+        return False
+    
+    def Simplex(self):
+        if not(self.Simplex_aux(self.A, self.B, self.C)):
+            self.Tableau = self.make_Tableau(self.A, self.B, self.C)
+            self.Tableau = self.get_original_base(self.Tableau_aux)
+            self.Tableau = self.Simplex_model(self.A, self.B, self.C, self.Tableau)
+            if(self.Status != 'ilimitada'):
+                self.Status = 'otima'
+                self.optimal_value = self.Tableau[0,-1]
+                self.Certificate = self.Tableau[0,0:self.B.shape[0]]
+                self.solution = self.make_solution(self.Tableau)
+                self.solution = self.solution[:self.variables]
